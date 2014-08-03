@@ -1,0 +1,168 @@
+#!/usr/bin/env sh
+
+PROGRAM_NAME=rcbu
+LOCK_DIR_BASE="/var/local/lock/$PROGRAM_NAME"
+
+LOG_STATUS_INFO=0
+LOG_STATUS_NOTICE=1
+LOG_STATUS_ERR=2
+SUCCESS_CODE=0
+ERROR_CODE=1
+
+# Log error, send it to stderr, then die
+abort () {
+    if [ -n "$2" ]; then
+        message "$2"
+        log $LOG_STATUS_ERR "$2"
+    fi
+
+    die $1
+}
+
+# Delete lock directory (on success), stop execution, and return a status code
+die () {
+    if [ "$1" -eq "$SUCCESS_CODE" -a -d "$LOCK_DIR" ]; then
+        if [ "$(dirname "$LOCK_DIR")" = "$LOCK_DIR_BASE" ]; then
+            rm -rf "$LOCK_DIR"
+        fi
+    fi
+    exit $1
+}
+
+# Send message to system logger
+log () {
+    LOG_STATUS=""
+
+    if [ "$1" -eq "$LOG_STATUS_INFO" ]; then
+        LOG_STATUS="info"
+    elif [ "$1" -eq "$LOG_STATUS_NOTICE" ]; then
+        LOG_STATUS="notice"
+    elif [ "$1" -eq "$LOG_STATUS_ERR" ]; then
+        LOG_STATUS="err"
+    else
+        # quit, but don't use abort function, since abort calls this function
+        message "error: invalid log status code: $1"
+        die $ERROR_CODE
+    fi
+
+    logger -p "user.$LOG_STATUS" -t "$PROGRAM_NAME" -- "$2"
+}
+
+# Send message to stderr
+message () {
+    echo "$1" 1>&2
+}
+
+# main
+
+if ! which logger &> /dev/null; then
+    message "error: logger command not available"
+    die $ERROR_CODE
+fi
+
+if ! which rsync &> /dev/null; then
+    abort $ERROR_CODE "error: rsync command not available"
+fi
+
+CONFIG_FILE=/etc/rcbu.conf
+
+if [ ! -f "$CONFIG_FILE" ]; then
+    abort $ERROR_CODE "error: config file does not exist"
+fi
+
+# attempt to make parent of lock directory
+MKDIR_OUTPUT=$(mkdir -p "$LOCK_DIR_BASE" 2>&1)
+if [ "$?" -ne "0"]; then
+    MESSAGE="error: could not create directory $LOCK_DIR_BASE: $MKDIR_OUTPUT"
+    abort $ERROR_CODE "$MESSAGE"
+fi
+
+# there is only one instance of rcbu allowed per conf, so we use a hash of the
+# config file name to create the per config lock directory
+CONFIG_NAME_HASH=$(echo "$CONFIG_FILE" | md5sum | awk '{print $1}')
+LOCK_DIR="$LOCK_DIR_BASE/$CONFIG_NAME_HASH"
+
+log $LOG_STATUS_INFO "checking lock directory $LOCK_DIR"
+
+# check for lock directory by attempting to make it (directory is used because
+# checking and creating a directory is an atomic operation)
+if ! mkdir "$LOCK_DIR" &> /dev/null; then
+    MESSAGE="error: there is already an instance of $PROGRAM_NAME running for"
+    MESSAGE="$MESSAGE config $CONFIG_FILE, or the last run exited abnormally"
+    abort $ERROR_CODE "$MESSAGE"
+fi
+
+log $LOG_STATUS_INFO "sourcing config file $CONFIG_FILE"
+
+source "$CONFIG_FILE"
+
+if [ -z "$SRC_DIRS" ]; then
+    abort $ERROR_CODE "error: SRC_DIRS not set"
+fi
+
+if [ -z "$RMT_USER" ]; then
+    abort $ERROR_CODE "error: RMT_USER not set"
+fi
+
+if [ -z "$RMT_HOST" ]; then
+    abort $ERROR_CODE "error: RMT_HOST not set"
+fi
+
+if [ -z "$RMT_DIR" ]; then
+    abort $ERROR_CODE "error: RMT_DIR not set"
+fi
+
+if [ -z "$RS_OPTS" ]; then
+    RS_OPTS="-vaHAXR --delete"
+fi
+
+EXL_OPTS=""
+
+if [ -n "$SRC_EXL_DIRS" ]; then
+    for DIR in $SRC_EXL_DIRS; do
+        EXL_OPTS="$EXL_OPTS --exclude=$DIR"
+    done
+fi
+
+log $LOG_STATUS_INFO "checking connectivity to $RMT_USER"@"$RMT_HOST"
+
+# check if we can connect to remote host first
+SSH_OUTPUT=$( \
+    ssh \
+        -o BatchMode=yes \
+        "$RMT_USER"@"$RMT_HOST" \
+        echo \
+    2>&1)
+
+SSH_STATUS="$?"
+
+if [ "$SSH_STATUS" -ne "0" ]; then
+    # TODO: make ignoring or reporting this error configurable
+    log $LOG_STATUS_NOTICE "connection to remote host failed: $SSH_OUTPUT"
+    die $SUCCESS_CODE
+fi
+
+# TODO: add ability to run pre and post hooks
+# TODO: add ability to optionally specify the conf via command line
+# TODO: add ability to disable notifications to prevent error spam
+
+MESSAGE="running: rsync $RS_OPTS $EXL_OPTS $SRC_DIRS"
+MESSAGE="$MESSAGE $RMT_USER@$RMT_HOST:$RMT_DIR"
+log $LOG_STATUS_INFO $MESSAGE
+
+RSYNC_OUTPUT=$( \
+    rsync \
+        $RS_OPTS \
+        $EXL_OPTS \
+        $SRC_DIRS \
+        "$RMT_USER"@"$RMT_HOST":"$RMT_DIR" \
+    2>&1)
+
+RSYNC_STATUS="$?"
+
+if [ "$RSYNC_STATUS" -ne "0" ]; then
+    abort $RSYNC_STATUS "$RSYNC_OUTPUT"
+else
+    log $LOG_STATUS_INFO "success: backup completed"
+    die $SUCCESS_CODE
+fi
