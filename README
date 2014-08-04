@@ -1,0 +1,13 @@
+rcbu - Rsync via Cron Backup Utility
+
+rcbu is a cron-friendly shell script for creating remote backups using rsync. Configuration options go in /etc/rcbu.conf (see the sample config file). This script will only produce output when there are errors, making it suitable to run as a cron job. Status messages are sent to syslog.
+
+rcbu right now is best suited for laptops, where there's the possibility that backups will be interrupted or you may not be on the network where your backup server is. Through the use of persistent, per-config lock files, rcbu can detect when other instances are running or were interrupted, and stop itself to prevent conflicts.
+
+Requirements:
+
+* rsync
+* syslog
+* local mail daemon (optional, but useful to see cron output)
+
+Unfortunately, further documentation at the moment is limited to "read the damn source", but more documentation is forthcoming as time allows.
