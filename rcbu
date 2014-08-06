@@ -89,7 +89,7 @@ fi
 
 # attempt to make parent of lock directory
 MKDIR_OUTPUT=$(mkdir -p "$LOCK_DIR_BASE" 2>&1)
-if [ "$?" -ne "0"]; then
+if [ "$?" -ne "0" ]; then
     MESSAGE="error: could not create directory $LOCK_DIR_BASE: $MKDIR_OUTPUT"
     abort $ERROR_CODE "$MESSAGE"
 fi
@@ -135,9 +135,13 @@ fi
 
 EXL_OPTS=""
 
-if [ -n "$SRC_EXL_DIRS" ]; then
-    for DIR in $SRC_EXL_DIRS; do
-        EXL_OPTS="$EXL_OPTS --exclude=$DIR"
+# SRC_EXL_DIRS is an array so that any shell globs in its elements are not
+# interpreted
+if [ -n "${SRC_EXL_DIRS[*]}" ]; then
+    i=0
+    while [ "$i" -lt "${#SRC_EXL_DIRS[*]}" ]; do
+        EXL_OPTS="$EXL_OPTS --exclude=${SRC_EXL_DIRS[i]}"
+        i=$((i + 1))
     done
 fi
 
@@ -165,7 +169,7 @@ fi
 
 MESSAGE="running: rsync $RS_OPTS $EXL_OPTS $SRC_DIRS"
 MESSAGE="$MESSAGE $RMT_USER@$RMT_HOST:$RMT_DIR"
-log $LOG_STATUS_INFO $MESSAGE
+log $LOG_STATUS_INFO "$MESSAGE"
 
 RSYNC_OUTPUT=$( \
     rsync \

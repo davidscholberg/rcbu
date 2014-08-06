@@ -1,6 +1,8 @@
 #RS_OPTS="-vaHAXR --delete"
 SRC_DIRS="/root /etc /usr/local /home"
-SRC_EXL_DIRS="/home/*/.cache/ /home/*/media/ lost+found/"
+SRC_EXL_DIRS[0]="/home/*/.cache/"
+SRC_EXL_DIRS[1]="/home/*/media/"
+SRC_EXL_DIRS[2]="lost+found/"
 RMT_USER=person
 RMT_HOST=example.com
 RMT_DIR=/srv/mnt/share/laptop-backup
